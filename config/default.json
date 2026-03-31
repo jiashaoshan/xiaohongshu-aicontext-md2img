@@ -1,0 +1,71 @@
+{
+  "output": {
+    "baseDir": "./output",
+    "structure": {
+      "formatted": "formatted",
+      "card": "card",
+      "redbookContext": "redbook_context.txt"
+    }
+  },
+  "card": {
+    "concurrentLimit": 8,
+    "charsPerPage": 320,
+    "maxRetries": 2,
+    "timeoutMs": 60000,
+    "batchDelayMs": 500
+  },
+  "xiaohongshu": {
+    "contentMaxLength": 1000,
+    "titleMaxLength": 20
+  },
+  "cover": {
+    "template": "小红书封面卡片设计，纯白背景，竖版1440x2038像素。顶部文字区域：大标题粗黑体3号字正红色#E60012文字内容为"{topic}"，副标题宋体小4号红色带双引号文字为"{summary}"。中间配图区域：居中放置一张与主题相关的高质量配图，图片风格明亮温暖生活美学摄影风格，图片两侧保留大量白色留白对称布局，图片宽度约占卡片宽度的60-70%。整体风格：极简主义现代感专业大气留白充足视觉焦点突出，无多余装饰元素纯净简洁的排版设计",
+    "size": "2K",
+    "timeoutMs": 120000
+  },
+  "cardStyle": {
+    "bgColor": "#ffffff",
+    "highlightColor": "#ff6b35",
+    "footerText": "个人原创，请勿转载",
+    "lineHeight": 1.9,
+    "fontSize": 28
+  },
+  "emoji": {
+    "replacements": {
+      "好": "👍好",
+      "棒": "👏棒",
+      "重要": "🔥重要",
+      "注意": "⚠️注意",
+      "推荐": "⭐推荐",
+      "步骤": "✨步骤",
+      "爱": "❤️爱",
+      "笑": "😂笑"
+    }
+  },
+  "deAiPatterns": {
+    "remove": [
+      "^(以下是|以下是关于|本文将|这篇文章将|让我们|值得注意的是|需要指出的是)",
+      "众所周知|不可否认的是|必须承认的是"
+    ],
+    "replace": {
+      "非常|十分|极其|特别": "",
+      "众所周知|不可否认的是|必须承认的是": "说实话"
+    },
+    "markers": {
+      "首先|其次|再次|最后": "👉",
+      "总之|综上所述|总而言之": "👉"
+    }
+  },
+  "titleFormulas": [
+    "3分钟读懂{topic}",
+    "{topic}|看完这篇就够了",
+    "终于有人把{topic}讲清楚了",
+    "{topic}?90%的人都理解错了",
+    "关于{topic},没人告诉你的真相",
+    "读完{topic},我悟了",
+    "{topic}|改变我人生的3个观点"
+  ],
+  "hashtags": {
+    "base": ["#干货分享", "#知识科普", "#必看", "#自我提升"]
+  }
+}

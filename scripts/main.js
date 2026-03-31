@@ -14,6 +14,20 @@ const MARKDOWN_TO_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skill
 const DOUBAO_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/doubao-image-create');
 const Z_CARD_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/z-card-image');
 
+// 加载配置
+const CONFIG = loadConfig();
+
+function loadConfig() {
+  const configPath = path.join(SKILL_DIR, 'config/default.json');
+  try {
+    const configData = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(configData);
+  } catch (e) {
+    console.warn('⚠️  配置文件加载失败，使用默认配置');
+    return {};
+  }
+}
+
 // 解析参数
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -326,12 +340,20 @@ function step4GenerateCover(topic, summary, outputDir) {
     const cleanTopic = topic.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 30);
     const cleanSummary = summary.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/#/g, '').substring(0, 20);
     
-    // 构建豆包提示词模板 - 单行格式避免shell问题
-    const prompt = `小红书封面卡片设计，纯白背景，竖版1440x2038像素。顶部文字区域：大标题粗黑体3号字正红色#E60012文字内容为"${cleanTopic}"，副标题宋体小4号红色带双引号文字为"${cleanSummary}"。中间配图区域：居中放置一张与主题相关的高质量配图，图片风格明亮温暖生活美学摄影风格，图片两侧保留大量白色留白对称布局，图片宽度约占卡片宽度的60-70%。整体风格：极简主义现代感专业大气留白充足视觉焦点突出，无多余装饰元素纯净简洁的排版设计`;
+    // 从配置文件加载封面模板
+    const coverConfig = CONFIG.cover || {};
+    const template = coverConfig.template || '小红书封面卡片设计，纯白背景，竖版1440x2038像素。顶部文字区域：大标题粗黑体3号字正红色#E60012文字内容为"{topic}"，副标题宋体小4号红色带双引号文字为"{summary}"。中间配图区域：居中放置一张与主题相关的高质量配图，图片风格明亮温暖生活美学摄影风格，图片两侧保留大量白色留白对称布局，图片宽度约占卡片宽度的60-70%。整体风格：极简主义现代感专业大气留白充足视觉焦点突出，无多余装饰元素纯净简洁的排版设计';
+    
+    // 替换模板变量
+    const prompt = template
+      .replace(/{topic}/g, cleanTopic)
+      .replace(/{summary}/g, cleanSummary);
     
     // 使用豆包生成封面
-    const cmd = `node "${DOUBAO_IMAGE}/scripts/generate.js" "${prompt}" --output "${coverPath}" --size 2K`;
-    execSync(cmd, { stdio: 'pipe', timeout: 120000 });
+    const size = coverConfig.size || '2K';
+    const timeoutMs = coverConfig.timeoutMs || 120000;
+    const cmd = `node "${DOUBAO_IMAGE}/scripts/generate.js" "${prompt}" --output "${coverPath}" --size ${size}`;
+    execSync(cmd, { stdio: 'pipe', timeout: timeoutMs });
     
     // 检查文件是否生成
     if (fs.existsSync(coverPath)) {
@@ -375,12 +397,13 @@ async function step5GenerateCards(article, outputDir, topic) {
     cleanArticle = cleanArticle.replace(/^# .+\n/, '');
 
     // 按语义分页，每页约280-340字符（z-card-image建议）
-    const pages = splitArticleIntoPages(cleanArticle, 320);
+    const charsPerPage = CONFIG.card?.charsPerPage || 320;
+    const pages = splitArticleIntoPages(cleanArticle, charsPerPage);
     const totalPages = pages.length;
     
     console.log(`   📊 文章分 ${totalPages} 页`);
     console.log(`   📝 平均每页: ${Math.floor(cleanArticle.length / totalPages)} 字符`);
-    console.log(`   ⚡ 并发生成: 最多8张同时生成`);
+    console.log(`   ⚡ 并发生成: 最多${CONFIG.card?.concurrentLimit || 8}张同时生成`);
 
     // 生成卡片图片
     const cardsDir = path.join(outputDir, 'cards');
@@ -408,8 +431,8 @@ async function step5GenerateCards(article, outputDir, topic) {
       });
     }
 
-    // 并发生成卡片，最多8个并发
-    const CONCURRENT_LIMIT = 8;
+    // 并发生成卡片
+    const CONCURRENT_LIMIT = CONFIG.card?.concurrentLimit || 8;
     let completedCount = 0;
     
     async function generateCard(task) {
@@ -417,7 +440,7 @@ async function step5GenerateCards(article, outputDir, topic) {
       const pageNum = pageIndex + 1;
       
       let success = false;
-      let retries = 2;
+      let retries = CONFIG.card?.maxRetries || 2;
       
       while (!success && retries > 0) {
         try {
@@ -425,17 +448,18 @@ async function step5GenerateCards(article, outputDir, topic) {
           const escapedContent = pageContent.replace(/"/g, '\\"');
           const escapedTitle = title.replace(/"/g, '\\"');
           
+          const cardStyle = CONFIG.cardStyle || {};
           const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
             --title "${escapedTitle}" \
             --text "${escapedContent}" \
             --page-num ${pageNum} \
             --page-total ${totalPages} \
             --out "${cardPath}" \
-            --footer "个人原创，请勿转载" \
-            --bg "#ffffff" \
-            --highlight "#ff6b35"`;
+            --footer "${cardStyle.footerText || '个人原创，请勿转载'}" \
+            --bg "${cardStyle.bgColor || '#ffffff'}" \
+            --highlight "${cardStyle.highlightColor || '#ff6b35'}"`;
           
-          await execAsync(cmd, { timeout: 60000 });
+          await execAsync(cmd, { timeout: CONFIG.card?.timeoutMs || 60000 });
           
           completedCount++;
           console.log(`   ✅ 卡片 ${pageNum}/${totalPages} (${completedCount}/${tasks.length})`);
@@ -453,13 +477,14 @@ async function step5GenerateCards(article, outputDir, topic) {
     }
 
     // 分批并发执行
+    const batchDelayMs = CONFIG.card?.batchDelayMs || 500;
     for (let i = 0; i < tasks.length; i += CONCURRENT_LIMIT) {
       const batch = tasks.slice(i, i + CONCURRENT_LIMIT);
       await Promise.all(batch.map(task => generateCard(task)));
       
-      // 每批完成后休息500ms，避免系统过载
+      // 每批完成后休息，避免系统过载
       if (i + CONCURRENT_LIMIT < tasks.length) {
-        await sleep(500);
+        await sleep(batchDelayMs);
       }
     }
 
@@ -696,32 +721,44 @@ async function step6RewriteForXiaohongshu(article, topic) {
   let content = article.replace(/^---[\s\S]*?---\n*/, '');
   content = content.replace(/^# .+\n/, '');
 
-  // 生成小红书文案(1000字以内)
-  let xhsContent = content.substring(0, 1000);
+  // 生成小红书文案
+  const contentMaxLength = CONFIG.xiaohongshu?.contentMaxLength || 1000;
+  let xhsContent = content.substring(0, contentMaxLength);
   console.log(`   📝 原始长度: ${content.length} 字，截取后: ${xhsContent.length} 字`);
 
   // 添加emoji
-  xhsContent = xhsContent
-    .replace(/好/g, '👍好')
-    .replace(/棒/g, '👏棒')
-    .replace(/重要/g, '🔥重要')
-    .replace(/注意/g, '⚠️注意')
-    .replace(/推荐/g, '⭐推荐')
-    .replace(/步骤/g, '✨步骤')
-    .replace(/爱/g, '❤️爱')
-    .replace(/笑/g, '😂笑');
+  const emojiConfig = CONFIG.emoji?.replacements || {};
+  for (const [key, value] of Object.entries(emojiConfig)) {
+    xhsContent = xhsContent.replace(new RegExp(key, 'g'), value);
+  }
 
-  // 使用 humanizer 技能去AI味（简化版）
+  // 去AI味处理
   console.log('   → 去AI味处理...');
   try {
-    // 简单的去AI味处理：移除一些常见的AI写作模式
-    xhsContent = xhsContent
-      .replace(/^(以下是|以下是关于|本文将|这篇文章将|让我们|值得注意的是|需要指出的是)/gm, '')
-      .replace(/(首先|其次|再次|最后|总之|综上所述|总而言之)[，：]/g, '👉')
-      .replace(/非常|十分|极其|特别/g, '')
-      .replace(/众所周知|不可否认的是|必须承认的是/g, '说实话')
-      .replace(/[。！？]$/gm, '$&\n')  // 确保句子结尾有换行
-      .trim();
+    const deAiPatterns = CONFIG.deAiPatterns || {};
+    
+    // 移除AI常用开头
+    if (deAiPatterns.remove) {
+      for (const pattern of deAiPatterns.remove) {
+        xhsContent = xhsContent.replace(new RegExp(pattern, 'gm'), '');
+      }
+    }
+    
+    // 替换词汇
+    if (deAiPatterns.replace) {
+      for (const [pattern, replacement] of Object.entries(deAiPatterns.replace)) {
+        xhsContent = xhsContent.replace(new RegExp(pattern, 'g'), replacement);
+      }
+    }
+    
+    // 替换标记词
+    if (deAiPatterns.markers) {
+      for (const [pattern, replacement] of Object.entries(deAiPatterns.markers)) {
+        xhsContent = xhsContent.replace(new RegExp(`(${pattern})[，：]`, 'g'), `${replacement}`);
+      }
+    }
+    
+    xhsContent = xhsContent.trim();
     console.log('   ✅ 已去AI味');
   } catch (e) {
     console.log('   ⚠️  去AI味处理失败，使用原文:', e.message);
@@ -743,30 +780,33 @@ async function step6RewriteForXiaohongshu(article, topic) {
 
 // 生成爆款小红书标题
 function generateXiaohongshuTitle(originalTitle, topic) {
-  // 爆款标题公式
-  const formulas = [
-    // 数字+痛点+解决方案
-    `3分钟读懂${topic.substring(0, 10)}`,
-    `${topic.substring(0, 8)}|看完这篇就够了`,
-    `终于有人把${topic.substring(0, 8)}讲清楚了`,
-    // 悬念+利益
-    `${topic.substring(0, 8)}?90%的人都理解错了`,
-    `关于${topic.substring(0, 8)},没人告诉你的真相`,
-    // 情绪+共鸣
-    `读完${topic.substring(0, 6)},我悟了`,
-    `${topic.substring(0, 8)}|改变我人生的3个观点`,
-    // 直接截取原标题(如果合适)
-    originalTitle.substring(0, 20)
+  const titleMaxLength = CONFIG.xiaohongshu?.titleMaxLength || 20;
+  const formulas = CONFIG.titleFormulas || [
+    `3分钟读懂{topic}`,
+    `{topic}|看完这篇就够了`,
+    `终于有人把{topic}讲清楚了`,
+    `{topic}?90%的人都理解错了`,
+    `关于{topic},没人告诉你的真相`,
+    `读完{topic},我悟了`,
+    `{topic}|改变我人生的3个观点`
   ];
 
-  // 选择最合适的标题(优先数字+痛点)
-  for (const formula of formulas) {
-    if (formula.length <= 20 && formula.length >= 10) {
+  // 替换模板变量
+  const processedFormulas = formulas.map(f => 
+    f.replace(/{topic}/g, topic.substring(0, 10))
+  );
+
+  // 添加原标题作为备选
+  processedFormulas.push(originalTitle.substring(0, titleMaxLength));
+
+  // 选择最合适的标题(优先长度10-20)
+  for (const formula of processedFormulas) {
+    if (formula.length <= titleMaxLength && formula.length >= 10) {
       return formula;
     }
   }
 
-  return originalTitle.substring(0, 20);
+  return originalTitle.substring(0, titleMaxLength);
 }
 
 // 生成相关hashtag
@@ -775,7 +815,7 @@ function generateHashtags(topic) {
   const keywords = topic.replace(/[^\u4e00-\u9fa5]/g, '').substring(0, 4);
 
   // 通用hashtag组合
-  const baseTags = ['#干货分享', '#知识科普', '#必看', '#自我提升'];
+  const baseTags = CONFIG.hashtags?.base || ['#干货分享', '#知识科普', '#必看', '#自我提升'];
   const topicTag = keywords ? `#${keywords}` : '#深度好文';
 
   return [topicTag, ...baseTags].join(' ');
