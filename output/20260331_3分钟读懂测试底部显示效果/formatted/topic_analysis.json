@@ -1,7 +1,0 @@
-{
-  "topic": "底部显示效果深度测试：50款主流应用横评+Web端兼容性实战指南",
-  "articleType": "analysis",
-  "targetAudience": "前端开发者、UI/UX设计师、测试工程师、关注用户体验的产品经理",
-  "sellingPoint": "从电子面单到APP导航：那些藏在屏幕底部的'显示陷阱'与测试盲区",
-  "angle": "整合系统文档实用性、技术测试深度与悬念对比形式，首次系统梳理底部显示（Bottom Display）全场景测试方案，通过横向实测揭露iOS/Android/Web三端底部适配的隐藏差异与反直觉结论"
-}
