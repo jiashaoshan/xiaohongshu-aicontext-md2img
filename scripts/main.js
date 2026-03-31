@@ -18,12 +18,19 @@ const Z_CARD_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/z-c
 const CONFIG = loadConfig();
 
 function loadConfig() {
-  const configPath = path.join(SKILL_DIR, 'config/default.json');
+  const configPath = path.join(SKILL_DIR, 'config', 'default.json');
+  console.log(`   → 加载配置文件: ${configPath}`);
   try {
+    if (!fs.existsSync(configPath)) {
+      console.warn(`⚠️  配置文件不存在: ${configPath}`);
+      return {};
+    }
     const configData = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(configData);
+    const config = JSON.parse(configData);
+    console.log('   ✅ 配置文件加载成功');
+    return config;
   } catch (e) {
-    console.warn('⚠️  配置文件加载失败，使用默认配置');
+    console.warn(`⚠️  配置文件加载失败: ${e.message}`);
     return {};
   }
 }
