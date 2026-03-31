@@ -1,0 +1,28 @@
+# Output files
+output/
+
+# Temporary files
+temp/
+*.tmp
+*.temp
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+test*.js
+*_test.js
