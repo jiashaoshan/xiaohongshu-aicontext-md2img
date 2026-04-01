@@ -19,16 +19,17 @@
     "titleMaxLength": 20
   },
   "cover": {
-    "template": "小红书封面卡片设计，纯白背景，竖版1440x2038像素。顶部文字区域：大标题粗宋体2号字正红色#E60012文字内容为'{topic}'，空一行，副标题黑体4号红色带双引号文字为'{summary}'。中间配图区域：居中放置一张与主题相关的高质量配图，图片宽度约占卡片宽度的70-80%。整体风格：极简主义现代感专业大气留白充足视觉焦点突出，无多余装饰元素纯净简洁的排版设计",
+    "template": "小红书封面卡片，纯白背景竖版2K(1440x2038)。【标题区-占70%顶部区域】：大标题【正红#E60012、粗宋体120px、加粗、居左】='{topic}'；下行副标题【灰色#666666、黑体48px】='{summary}'。【底部落款-固定40px高】：右侧显示【灰色小字：作者你的名字】+【字数XXX阅读约X分钟】。整体风格：极简纯净无装饰，标题醒目突出，底部落款固定",
     "size": "2K",
     "timeoutMs": 120000
   },
   "cardStyle": {
     "bgColor": "#ffffff",
-    "highlightColor": "#ff6b35",
-    "footerText": "个人原创，请勿转载",
-    "lineHeight": 1.9,
-    "fontSize": 28
+    "highlightColor": "#E60012",
+    "footerText": "字数 {count} | 阅读约 {minutes} 分钟",
+    "lineHeight": 2.5,
+    "fontSize": 28,
+    "showFooter": true
   },
   "emoji": {
     "replacements": {

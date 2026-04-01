@@ -336,48 +336,91 @@ ${content}
 </html>`;
 }
 
-// 步骤4:生成封面图(使用豆包图片生成)
-function step4GenerateCover(topic, summary, outputDir) {
+// 步骤4:生成封面图(使用 z-card-image 生成标题页)
+function step4GenerateCover(topic, summary, outputDir, title, article) {
   console.log('\n🖼️  步骤4: 生成封面图...');
 
-  const coverPath = path.join(outputDir, 'cover.jpg');
+  const coverPath = path.join(outputDir, 'cover.png');
+  const coverHtmlPath = path.join(outputDir, 'cover.html');
   
   try {
-    // 清理特殊字符，避免shell解析错误
+    // 使用 z-card-image 生成标题页封面
+    // 生成标题页 HTML 内容（大标题居中，宋体红色）
+    const safeTitle = title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 从标题中提取副标题（如果有冒号或破折号）
+    let subtitle = '';
+    if (title.includes('：')) {
+      subtitle = title.split('：')[1].trim();
+    } else if (title.includes('——')) {
+      subtitle = title.split('——')[1].trim();
+    } else if (title.includes('-')) {
+      subtitle = title.split('-')[1].trim();
+    }
+    const safeSubtitle = subtitle.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // 估算阅读时间（按每分钟300字计算）
+    const wordCount = article.length;
+    const readTime = Math.max(1, Math.ceil(wordCount / 300));
+    
+    // 主标题用话题本身，副标题用生成的小标题
+    const mainTitle = topic;  // 话题本身，如"中国发展新质生产力的目的"
+    const subtitleText = safeTitle;  // 生成的小标题，如"3分钟读懂..."
+    
+    const cardStyle = CONFIG.cardStyle || {};
+    // 封面：标题=主标题(话题)，副标题=小标题
+    // footer格式："字数XXX | 阅读约X分钟"
+    const coverFooter = `字数 ${wordCount} | 阅读约 ${readTime} 分钟`;
+    const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
+      --title "${mainTitle}" \
+      --text "${subtitleText}" \
+      --page-num 1 \
+      --page-total 1 \
+      --out "${coverPath}" \
+      --footer "${coverFooter}" \
+      --bg "${cardStyle.bgColor || '#ffffff'}" \
+      --highlight "${cardStyle.highlightColor || '#E60012'}" \
+      --page-num 1 \
+      --page-total 1 \
+      --cover`;
+    
+    execSync(cmd, { stdio: 'pipe', timeout: 60000 });
+    console.log('   ✅ 封面渲染完成:', coverPath);
+    
+    if (fs.existsSync(coverPath)) {
+      console.log('✅ 封面图生成完成 (z-card-image 标题页)');
+      return coverPath;
+    }
+  } catch (error) {
+    console.error('⚠️  z-card-image 封面生成失败:', error.message);
+    // 保留调试文件
+    const debugHtmlPath = path.join(outputDir, 'cover_debug.html');
+    fs.copyFileSync(coverHtmlPath, debugHtmlPath);
+    console.log('   📝 调试HTML已复制:', debugHtmlPath);
+  }
+  
+  // 备用：尝试豆包生成
+  try {
     const cleanTopic = topic.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 30);
     const cleanSummary = summary.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/#/g, '').substring(0, 20);
     
-    // 从配置文件加载封面模板
     const coverConfig = CONFIG.cover || {};
     const template = coverConfig.template || '小红书封面卡片设计，纯白背景，竖版1440x2038像素。顶部文字区域：大标题粗黑体3号字正红色#E60012文字内容为"{topic}"，副标题宋体小4号红色带双引号文字为"{summary}"。中间配图区域：居中放置一张与主题相关的高质量配图，图片风格明亮温暖生活美学摄影风格，图片两侧保留大量白色留白对称布局，图片宽度约占卡片宽度的60-70%。整体风格：极简主义现代感专业大气留白充足视觉焦点突出，无多余装饰元素纯净简洁的排版设计';
     
-    // 替换模板变量
     const prompt = template
       .replace(/{topic}/g, cleanTopic)
       .replace(/{summary}/g, cleanSummary);
     
-    // 使用豆包生成封面
     const size = coverConfig.size || '2K';
     const timeoutMs = coverConfig.timeoutMs || 120000;
     const cmd = `node "${DOUBAO_IMAGE}/scripts/generate.js" "${prompt}" --output "${coverPath}" --size ${size}`;
     execSync(cmd, { stdio: 'pipe', timeout: timeoutMs });
     
-    // 检查文件是否生成
     if (fs.existsSync(coverPath)) {
       console.log('✅ 封面图生成完成 (豆包)');
       return coverPath;
-    } else {
-      console.log('⚠️  豆包未生成封面，检查output目录...');
-      // 豆包可能输出到不同路径
-      const doubaoOutput = path.join(DOUBAO_IMAGE, 'output/image.jpg');
-      if (fs.existsSync(doubaoOutput)) {
-        fs.copyFileSync(doubaoOutput, coverPath);
-        console.log('✅ 封面图从豆包output目录复制成功');
-        return coverPath;
-      }
     }
   } catch (error) {
-    console.error('⚠️  封面生成失败:', error.message);
+    console.error('⚠️  豆包封面生成失败:', error.message);
   }
   
   // 使用默认图片
@@ -402,6 +445,49 @@ async function step5GenerateCards(article, outputDir, topic) {
     const titleMatch = cleanArticle.match(/^# (.+)$/m);
     const title = titleMatch ? titleMatch[1] : topic;
     cleanArticle = cleanArticle.replace(/^# .+\n/, '');
+    
+    // 过滤掉LLM的提示词和回复开头，只保留正文内容
+    // 找到第一个真正的正文标题（以 # 开头但不是在提示词中的）
+    // 常见模式：提示词后会有"让我开始写作："然后是正文
+    
+    // 方法1：查找"让我开始写作"之后的内容
+    const writingMatch = cleanArticle.match(/让我开始写作[：:]\s*#+\s+/);
+    if (writingMatch) {
+      const startIndex = cleanArticle.indexOf(writingMatch[0]) + writingMatch[0].length - 1;
+      cleanArticle = cleanArticle.substring(startIndex);
+    }
+    
+    // 简化过滤：找到第一个真正的正文段落
+    // 正文通常以 # 标题 开始，不是数字编号的列表项
+    const lines = cleanArticle.split('\n');
+    let startIndex = 0;
+    let foundRealContent = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      // 跳过空行和提示词相关的行
+      if (!line) continue;
+      
+      // 找到真正的正文标题（不以数字开头，不是提示词关键词）
+      if (line.match(/^#{1,2}\s+/) && !line.includes('写作：') && !line.includes('关键要求')) {
+        startIndex = i;
+        foundRealContent = true;
+        break;
+      }
+      // 如果遇到普通段落（非列表非编号），且有实际内容，也开始
+      if (line.length > 20 && !line.match(/^\d+[\.\)]\s+/) && !line.includes('：')) {
+        // 检查是否是正文（非提示词）
+        if (!line.includes('我已经收到了') && !line.includes('让我仔细分析')) {
+          startIndex = i;
+          foundRealContent = true;
+          break;
+        }
+      }
+    }
+    
+    if (foundRealContent) {
+      cleanArticle = lines.slice(startIndex).join('\n');
+    }
 
     // 按语义分页，每页约280-340字符（z-card-image建议）
     const charsPerPage = CONFIG.card?.charsPerPage || 320;
@@ -456,15 +542,21 @@ async function step5GenerateCards(article, outputDir, topic) {
           const escapedTitle = title.replace(/"/g, '\\"');
           
           const cardStyle = CONFIG.cardStyle || {};
+          const showFooter = cardStyle.showFooter !== false;
+          // 计算当前页的预估字数和阅读时间
+          const pageCharCount = pageContent.length;
+          const pageReadTime = Math.max(1, Math.ceil(pageCharCount / 300));
+          // 生成实际的footer文本（不包含占位符）
+          const pageFooter = showFooter ? `字数 ${pageCharCount} | 阅读约 ${pageReadTime} 分钟` : '';
           const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
             --title "${escapedTitle}" \
             --text "${escapedContent}" \
             --page-num ${pageNum} \
             --page-total ${totalPages} \
             --out "${cardPath}" \
-            --footer "${cardStyle.footerText || '个人原创，请勿转载'}" \
+            --footer "${pageFooter}" \
             --bg "${cardStyle.bgColor || '#ffffff'}" \
-            --highlight "${cardStyle.highlightColor || '#ff6b35'}"`;
+            --highlight "${cardStyle.highlightColor || '#E60012'}"`;
           
           await execAsync(cmd, { timeout: CONFIG.card?.timeoutMs || 60000 });
           
@@ -524,7 +616,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// 智能分页：按语义边界切分文章
+// 智能分页：按语义边界切分文章（保守策略，避免截断）
 function splitArticleIntoPages(article, charsPerPage) {
   const pages = [];
   const paragraphs = article.split('\n').filter(p => p.trim());
@@ -547,11 +639,14 @@ function splitArticleIntoPages(article, charsPerPage) {
     return count;
   }
   
+  // 分页系数：预留15%空间避免截断和footer重叠
+  const safeCharsPerPage = Math.floor(charsPerPage * 0.85);
+  
   for (const para of paragraphs) {
     const paraChars = countChars(para);
     
     // 如果当前页加上这段会超限，且当前页不为空，则新开一页
-    if (currentChars + paraChars > charsPerPage && currentPage) {
+    if (currentChars + paraChars > safeCharsPerPage && currentPage) {
       pages.push(currentPage.trim());
       currentPage = para;
       currentChars = paraChars;
@@ -931,11 +1026,15 @@ async function main() {
     // 提取文章概要（前20字）
     const articleSummary = article.replace(/^---[\s\S]*?---\n*/, '').replace(/^# .+\n/, '').replace(/\n/g, ' ').substring(0, 20) + '...';
 
+    // 提取标题
+    const titleMatch = article.match(/^# (.+)$/m);
+    const articleTitle = titleMatch ? titleMatch[1] : options.topic;
+    
     // 步骤3 & 4: 封面图先生成，富文本并行
     console.log('\n⚡ 步骤3 & 4: 封面图生成 + 富文本并行...');
     
     // 先生成封面图（避免并发冲突）
-    const coverPath = step4GenerateCover(options.topic, articleSummary, tempDir);
+    const coverPath = step4GenerateCover(options.topic, articleSummary, tempDir, articleTitle, article);
     
     // 再并行执行富文本转换
     const richTextPath = await step3ConvertToRichText(article, tempDir, options.theme);
