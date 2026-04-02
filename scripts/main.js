@@ -417,7 +417,7 @@ function splitArticleIntoPages(article, charsPerPage) {
   return pages.length > 0 ? pages : [article];
 }
 
-// 步骤6:改写小红书文案
+// 步骤6:改写小红书文案 - 使用LLM进行网感化改写
 async function step6RewriteForXiaohongshu(article, topic) {
   console.log('\n🔄 步骤6: 改写小红书文案...');
   const startTime = Date.now();
@@ -426,76 +426,107 @@ async function step6RewriteForXiaohongshu(article, topic) {
   const titleMatch = article.match(/^# (.+)$/m);
   const originalTitle = titleMatch ? titleMatch[1] : topic;
 
-  // 生成小红书标题
-  const xhsTitle = generateXiaohongshuTitle(originalTitle, topic);
+  // 保存临时文章文件
+  const tempDir = path.join(SKILL_DIR, 'temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const tempArticlePath = path.join(tempDir, `article_${Date.now()}.md`);
+  fs.writeFileSync(tempArticlePath, article, 'utf-8');
 
-  // 提取正文
+  try {
+    // 调用 rewrite-xhs.js 进行LLM改写
+    const rewriteScript = path.join(SKILL_DIR, 'scripts/rewrite-xhs.js');
+    const cmd = `node "${rewriteScript}" "${tempArticlePath}" "${topic}"`;
+    
+    console.log('   → 调用LLM进行网感化改写...');
+    const result = execSync(cmd, {
+      encoding: 'utf-8',
+      maxBuffer: 5 * 1024 * 1024,
+      timeout: 300000
+    });
+    
+    // 解析JSON输出
+    const jsonMatch = result.match(/---JSON_OUTPUT---\n([\s\S]+)$/);
+    let xhsData;
+    
+    if (jsonMatch) {
+      xhsData = JSON.parse(jsonMatch[1].trim());
+    } else {
+      // 尝试直接解析
+      try {
+        xhsData = JSON.parse(result);
+      } catch (e) {
+        throw new Error('无法解析改写结果');
+      }
+    }
+    
+    // 清理临时文件
+    try {
+      fs.unlinkSync(tempArticlePath);
+    } catch (e) {}
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✅ 小红书文案改写完成 (${duration}s)`);
+    console.log(`   标题: ${xhsData.title}`);
+    console.log(`   📄 正文长度: ${xhsData.content.length} 字`);
+    
+    return {
+      title: xhsData.title,
+      content: xhsData.content,
+      hashtags: xhsData.hashtags
+    };
+    
+  } catch (error) {
+    console.error('   ⚠️  LLM改写失败，回退到简单改写:', error.message);
+    
+    // 清理临时文件
+    try {
+      fs.unlinkSync(tempArticlePath);
+    } catch (e) {}
+    
+    // 回退到简单改写
+    return fallbackRewrite(article, topic, originalTitle);
+  }
+}
+
+// 简单改写（回退方案）
+function fallbackRewrite(article, topic, originalTitle) {
+  console.log('   → 使用简单改写模式...');
+  
   let content = article.replace(/^---[\s\S]*?---\n*/, '');
   content = content.replace(/^# .+\n/, '');
   content = cleanArticleContent(content);
-
-  // 截取1000字以内
+  
   const contentMaxLength = CONFIG.xiaohongshu?.contentMaxLength || 1000;
   let xhsContent = content.substring(0, contentMaxLength);
-  console.log(`   📝 原始长度: ${content.length} 字，截取后: ${xhsContent.length} 字`);
-
-  // 去AI味处理
-  console.log('   → 去AI味处理...');
-  try {
-    const deAiPatterns = CONFIG.deAiPatterns || {};
-    
-    if (deAiPatterns.remove) {
-      for (const pattern of deAiPatterns.remove) {
-        xhsContent = xhsContent.replace(new RegExp(pattern, 'gm'), '');
-      }
-    }
-    
-    if (deAiPatterns.replace) {
-      for (const [pattern, replacement] of Object.entries(deAiPatterns.replace)) {
-        xhsContent = xhsContent.replace(new RegExp(pattern, 'g'), replacement);
-      }
-    }
-    
-    xhsContent = xhsContent.trim();
-    console.log('   ✅ 已去AI味');
-  } catch (e) {
-    console.log('   ⚠️  去AI味处理失败:', e.message);
-  }
-
-  // 减少换行（最多保留一个空行）
-  xhsContent = xhsContent.replace(/\n{3,}/g, '\n\n');
-  xhsContent = xhsContent.replace(/^\n+|\n+$/g, '');
   
-  // 添加emoji到关键位置
-  const emojis = ['✨', '💡', '🔥', '⭐', '💪', '📌', '👉', '⚡', '🎯', '🚀'];
+  // 简单的去AI味
+  const deAiPatterns = CONFIG.deAiPatterns || {};
+  if (deAiPatterns.remove) {
+    for (const pattern of deAiPatterns.remove) {
+      xhsContent = xhsContent.replace(new RegExp(pattern, 'gm'), '');
+    }
+  }
+  
+  // 机械添加emoji
+  const emojis = ['✨', '💡', '🔥', '⭐', '💪'];
   const lines = xhsContent.split('\n');
   let emojiIndex = 0;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    // 给段落开头添加emoji（每3-5行添加一个）
-    if (line.length > 20 && emojiIndex < emojis.length) {
-      if (i % 4 === 0 || line.match(/^(首先|其次|最后|总结|建议|注意)/)) {
-        lines[i] = emojis[emojiIndex] + ' ' + line;
-        emojiIndex++;
-      }
-    }
-    // 给小标题添加emoji
-    if (line.match(/^(##?\s|【|\[)/)) {
-      lines[i] = '📌 ' + line;
+    if (line.length > 20 && emojiIndex < emojis.length && i % 4 === 0) {
+      lines[i] = emojis[emojiIndex] + ' ' + line;
+      emojiIndex++;
     }
   }
   xhsContent = lines.join('\n\n');
   
-  console.log('   ✅ 已添加emoji');
-
-  // 生成hashtag
+  const xhsTitle = generateXiaohongshuTitle(originalTitle, topic);
   const hashtags = generateHashtags(topic);
-
-  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`✅ 小红书文案改写完成 (${duration}s)`);
-  console.log(`   标题: ${xhsTitle}`);
-  console.log(`   📄 正文长度: ${xhsContent.length} 字`);
+  
+  console.log('   ✅ 简单改写完成');
   
   return {
     title: xhsTitle,
