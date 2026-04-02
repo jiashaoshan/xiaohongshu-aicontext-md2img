@@ -15,7 +15,7 @@
     "batchDelayMs": 500
   },
   "xiaohongshu": {
-    "contentMaxLength": 2000,
+    "contentMaxLength": 1000,
     "titleMaxLength": 20
   },
   "cover": {

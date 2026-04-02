@@ -347,24 +347,43 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
     // 使用 z-card-image 生成标题页封面
     // 生成标题页 HTML 内容（大标题居中，宋体红色）
     const safeTitle = title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // 清理话题，移除提示词相关的内容，只保留核心话题
+    let cleanTopic = topic
+      .replace(/^(老年人适合去哪里旅游)/, '$1')
+      .replace(/(最好写的有点深度|2000字|详细|完整).*$/, '')
+      .replace(/[,.，。！!]$/, '')
+      .trim();
+    
+    // 如果清理后话题太长，截取前15字
+    if (cleanTopic.length > 15) {
+      cleanTopic = cleanTopic.substring(0, 15);
+    }
+    
     // 从标题中提取副标题（如果有冒号或破折号）
     let subtitle = '';
     if (title.includes('：')) {
       subtitle = title.split('：')[1].trim();
     } else if (title.includes('——')) {
       subtitle = title.split('——')[1].trim();
-    } else if (title.includes('-')) {
-      subtitle = title.split('-')[1].trim();
+    } else if (title.includes('|')) {
+      subtitle = title.split('|')[1].trim();
     }
+    
+    // 如果没有提取到副标题，使用清理后的话题
+    if (!subtitle) {
+      subtitle = cleanTopic;
+    }
+    
     const safeSubtitle = subtitle.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     
     // 估算阅读时间（按每分钟300字计算）
     const wordCount = article.length;
     const readTime = Math.max(1, Math.ceil(wordCount / 300));
     
-    // 封面主标题用小红书文案标题，副标题用话题
-    const mainTitle = safeTitle;  // 小红书文案标题，如"寺庙禅修|看完这篇就够了"
-    const subtitleText = topic;   // 话题，如"寺庙禅修"
+    // 封面主标题用小红书文案标题，副标题用清理后的话题或提取的副标题
+    const mainTitle = safeTitle;  // 小红书文案标题
+    const subtitleText = safeSubtitle;   // 副标题（话题或标题后缀）
     
     const cardStyle = CONFIG.cardStyle || {};
     // footer格式："字数XXX | 阅读约X分钟"
@@ -1106,11 +1125,24 @@ async function main() {
     console.log('\n📝 步骤3: 富文本转换...');
     const richTextPath = await step3ConvertToRichText(article, tempDir, options.theme);
 
+    // 从富文本 HTML 提取纯文本内容用于小红书文案
+    let richTextContent = article;
+    if (richTextPath && fs.existsSync(richTextPath)) {
+      const htmlContent = fs.readFileSync(richTextPath, 'utf-8');
+      // 简单提取 body 中的文本内容（移除 HTML 标签）
+      richTextContent = htmlContent
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<[^>]+>/g, '\n')
+        .replace(/\n\s*\n/g, '\n')
+        .trim();
+    }
+
     // 步骤5 & 6: 并行执行(生成卡片 + 改写小红书文案)
     console.log('\n⚡ 步骤5 & 6: 并行执行...');
     const [cardsDir, xiaohongshu] = await Promise.all([
       step5GenerateCards(article, tempDir, options.topic),
-      step6RewriteForXiaohongshu(article, options.topic)
+      step6RewriteForXiaohongshu(richTextContent, options.topic)
     ]);
     
     // 步骤4: 封面图生成（使用小红书文案标题）
