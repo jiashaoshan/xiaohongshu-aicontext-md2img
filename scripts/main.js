@@ -362,12 +362,11 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
     const wordCount = article.length;
     const readTime = Math.max(1, Math.ceil(wordCount / 300));
     
-    // 主标题用话题本身，副标题用生成的小标题
-    const mainTitle = topic;  // 话题本身，如"中国发展新质生产力的目的"
-    const subtitleText = safeTitle;  // 生成的小标题，如"3分钟读懂..."
+    // 封面主标题用小红书文案标题，副标题用话题
+    const mainTitle = safeTitle;  // 小红书文案标题，如"寺庙禅修|看完这篇就够了"
+    const subtitleText = topic;   // 话题，如"寺庙禅修"
     
     const cardStyle = CONFIG.cardStyle || {};
-    // 封面：标题=主标题(话题)，副标题=小标题
     // footer格式："字数XXX | 阅读约X分钟"
     const coverFooter = `字数 ${wordCount} | 阅读约 ${readTime} 分钟`;
     const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
@@ -548,6 +547,12 @@ async function step5GenerateCards(article, outputDir, topic) {
           const pageReadTime = Math.max(1, Math.ceil(pageCharCount / 300));
           // 生成实际的footer文本（不包含占位符）
           const pageFooter = showFooter ? `字数 ${pageCharCount} | 阅读约 ${pageReadTime} 分钟` : '';
+          
+          // 调试：打印footer内容
+          if (pageNum % 2 === 0) {
+            console.log(`   🐛 卡片 ${pageNum} footer: "${pageFooter}"`);
+          }
+          
           const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
             --title "${escapedTitle}" \
             --text "${escapedContent}" \
@@ -639,8 +644,8 @@ function splitArticleIntoPages(article, charsPerPage) {
     return count;
   }
   
-  // 分页系数：预留15%空间避免截断和footer重叠
-  const safeCharsPerPage = Math.floor(charsPerPage * 0.85);
+  // 分页系数：预留25%空间避免截断和footer重叠
+  const safeCharsPerPage = Math.floor(charsPerPage * 0.75);
   
   for (const para of paragraphs) {
     const paraChars = countChars(para);
@@ -1030,13 +1035,8 @@ async function main() {
     const titleMatch = article.match(/^# (.+)$/m);
     const articleTitle = titleMatch ? titleMatch[1] : options.topic;
     
-    // 步骤3 & 4: 封面图先生成，富文本并行
-    console.log('\n⚡ 步骤3 & 4: 封面图生成 + 富文本并行...');
-    
-    // 先生成封面图（避免并发冲突）
-    const coverPath = step4GenerateCover(options.topic, articleSummary, tempDir, articleTitle, article);
-    
-    // 再并行执行富文本转换
+    // 步骤3: 富文本转换
+    console.log('\n📝 步骤3: 富文本转换...');
     const richTextPath = await step3ConvertToRichText(article, tempDir, options.theme);
 
     // 步骤5 & 6: 并行执行(生成卡片 + 改写小红书文案)
@@ -1045,6 +1045,11 @@ async function main() {
       step5GenerateCards(article, tempDir, options.topic),
       step6RewriteForXiaohongshu(article, options.topic)
     ]);
+    
+    // 步骤4: 封面图生成（使用小红书文案标题）
+    console.log('\n🖼️  步骤4: 生成封面图...');
+    const xiaohongshuTitle = xiaohongshu.title || articleTitle;
+    const coverPath = step4GenerateCover(options.topic, articleSummary, tempDir, xiaohongshuTitle, article);
 
     // 步骤7: 整理输出
     const finalOutputDir = step7OrganizeOutput(options.topic, article, xiaohongshu, options.output);
