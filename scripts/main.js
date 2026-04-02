@@ -80,42 +80,44 @@ function checkDependencies() {
   console.log('✅ 依赖检查通过');
 }
 
-// 步骤1:分析主题 + 生成提示词
+// 步骤1:分析主题 + 生成提示词 - 简化版，避免API调用
 function step1AnalyzeAndGeneratePrompt(topic, type) {
-  console.log('\n📝 步骤1: 分析主题 + 生成提示词...');
-  const startTime = Date.now();
+  console.log('\n📝 步骤1: 生成提示词...');
+  
+  // 简化分析（本地生成，不调用API）
+  const analysis = {
+    recommendedTopic: topic,
+    articleType: type || 'story',
+    targetAudience: '对话题感兴趣的读者'
+  };
+  
+  console.log(`   ✅ 推荐主题: ${analysis.recommendedTopic}`);
+  console.log(`   📊 文章类型: ${analysis.articleType}`);
 
-  try {
-    // 步骤1.1: 分析主题
-    console.log('   → 分析主题...');
-    const analyzeCmd = `cd "${WECHAT_PROMPT}" && node scripts/analyze-topic.js "${topic}"`;
-    execSync(analyzeCmd, { stdio: 'pipe' });
+  // 本地生成提示词（不调用generate-prompt.js）
+  const prompt = `请根据以下主题创作一篇公众号文章：
 
-    // 读取分析结果
-    const analysisPath = path.join(WECHAT_PROMPT, 'output/topic_analysis.json');
-    const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf-8'));
-    console.log(`   ✅ 推荐主题: ${analysis.recommendedTopic || topic}`);
-    console.log(`   📊 文章类型: ${analysis.articleType || type}`);
-    console.log(`   👥 目标读者: ${analysis.targetAudience || '未指定'}`);
+主题：${topic}
+类型：${type || 'story'}
 
-    // 步骤1.2: 生成提示词
-    console.log('   → 生成提示词...');
-    const promptCmd = `cd "${WECHAT_PROMPT}" && node scripts/generate-prompt.js "${topic}" ${type}`;
-    execSync(promptCmd, { stdio: 'pipe' });
+要求：
+1. 字数2000-3000字
+2. 使用Markdown格式
+3. 有深度、有观点
+4. 直接输出文章内容，不要写创作思路或前言
 
-    // 读取提示词
-    const promptPath = path.join(WECHAT_PROMPT, 'output/generated_prompt.txt');
-    const prompt = fs.readFileSync(promptPath, 'utf-8');
-    console.log(`   📝 提示词长度: ${prompt.length} 字符`);
+请直接开始写作：# ${topic}
 
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`✅ 步骤1完成 (${duration}s)`);
+`;
+  
+  // 保存提示词
+  const promptPath = path.join(WECHAT_PROMPT, 'output/generated_prompt.txt');
+  fs.writeFileSync(promptPath, prompt, 'utf-8');
+  
+  console.log(`   📝 提示词长度: ${prompt.length} 字符`);
+  console.log(`✅ 步骤1完成`);
 
-    return { analysis, prompt };
-  } catch (error) {
-    console.error('❌ 步骤1失败:', error.message);
-    throw error;
-  }
+  return { analysis, prompt };
 }
 
 // 步骤2:撰写文章 - 使用 openclaw agent 调用笔杆子 agent
