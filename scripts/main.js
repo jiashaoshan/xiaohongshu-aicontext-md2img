@@ -220,11 +220,17 @@ async function step3ConvertToRichText(article, outputDir, theme) {
     const articlePath = path.join(outputDir, 'article.md');
     fs.writeFileSync(articlePath, article, 'utf-8');
 
-    // 使用 wenyan-cli 转换为富文本（新版不支持--theme）
+    // 使用 wenyan-cli 渲染为富文本
     const outputPath = path.join(outputDir, 'article.html');
-    const convertCmd = `wenyan convert "${articlePath}" --output "${outputPath}"`;
-    
-    execSync(convertCmd, { stdio: 'pipe' });
+    try {
+      const markdownContent = fs.readFileSync(articlePath, 'utf8');
+      const { execSync } = require('child_process');
+      const result = execSync(`wenyan render -f "${articlePath}"`, { encoding: 'utf8' });
+      fs.writeFileSync(outputPath, result);
+      console.log(`✅ 富文本转换完成`);
+    } catch (e) {
+      console.log(`   ⚠️ 富文本转换失败，跳过: ${e.message}`);
+    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`✅ 富文本转换完成(${theme}主题)`);
@@ -253,9 +259,10 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
     const coverFooter = `字数 ${wordCount} | 阅读约 ${readTime} 分钟`;
     
     // 封面只用主标题，传入副标题作为文本内容
+    const safeSubtitle = (summary || '点击查看详情').substring(0, 50);
     const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
       --title "${safeTitle}" \
-      --text "${subtitle || '点击查看详情'}" \
+      --text "${safeSubtitle}" \
       --page-num 1 \
       --page-total 1 \
       --out "${coverPath}" \
