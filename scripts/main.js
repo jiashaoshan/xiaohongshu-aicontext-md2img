@@ -828,6 +828,38 @@ async function step6RewriteForXiaohongshu(article, topic) {
   let content = article.replace(/^---[\s\S]*?---\n*/, '');
   content = content.replace(/^# .+\n/, '');
 
+  // 过滤掉LLM的提示词和思考过程
+  // 方法1：查找"让我开始写作"之后的内容
+  const writingMatch = content.match(/让我开始写作[：:]\s*#+\s+/);
+  if (writingMatch) {
+    const startIndex = content.indexOf(writingMatch[0]) + writingMatch[0].length - 1;
+    content = content.substring(startIndex);
+  }
+
+  // 方法2：过滤提示词常见开头
+  const promptPatterns = [
+    /我已经收到了用户的请求[\s\S]*?让我开始写作[：:]?\s*/,
+    /我来为你撰写[\s\S]*?开始创作[：:]?\s*/,
+    /以下是关于[\s\S]*?的文章[：:]?\s*/,
+    /根据你的要求[\s\S]*?正文如下[：:]?\s*/,
+  ];
+  for (const pattern of promptPatterns) {
+    content = content.replace(pattern, '');
+  }
+
+  // 方法3：找到第一个真正的正文段落（以#开头的标题）
+  const lines = content.split('\n');
+  let startIndex = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    // 找到以 # 开头的标题行
+    if (line.match(/^#{1,2}\s+/) && line.length > 3) {
+      startIndex = i;
+      break;
+    }
+  }
+  content = lines.slice(startIndex).join('\n');
+
   // 生成小红书文案
   const contentMaxLength = CONFIG.xiaohongshu?.contentMaxLength || 1000;
   let xhsContent = content.substring(0, contentMaxLength);
