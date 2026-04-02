@@ -138,8 +138,11 @@ async function step2WriteArticle(prompt, topic) {
     const promptPath = path.join(WECHAT_PROMPT, 'output/generated_prompt.txt');
     fs.writeFileSync(promptPath, fullPrompt, 'utf-8');
 
+    // 读取提示词内容
+    const promptContent = fs.readFileSync(promptPath, 'utf-8');
+    
     // 使用 openclaw agent 调用笔杆子 agent
-    const openclawCmd = `openclaw agent --agent creator --file "${promptPath}" --json --timeout 600`;
+    const openclawCmd = `openclaw agent --agent creator -m '${promptContent.replace(/'/g, "'\\''")}' --json --timeout 600`;
     
     console.log('   → 等待笔杆子 agent 生成...');
     const result = execSync(openclawCmd, {
@@ -217,9 +220,9 @@ async function step3ConvertToRichText(article, outputDir, theme) {
     const articlePath = path.join(outputDir, 'article.md');
     fs.writeFileSync(articlePath, article, 'utf-8');
 
-    // 使用 wenyan-cli 转换为富文本
+    // 使用 wenyan-cli 转换为富文本（新版不支持--theme）
     const outputPath = path.join(outputDir, 'article.html');
-    const convertCmd = `wenyan convert "${articlePath}" --theme ${theme} --output "${outputPath}"`;
+    const convertCmd = `wenyan convert "${articlePath}" --output "${outputPath}"`;
     
     execSync(convertCmd, { stdio: 'pipe' });
 
@@ -249,10 +252,10 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
     const cardStyle = CONFIG.cardStyle || {};
     const coverFooter = `字数 ${wordCount} | 阅读约 ${readTime} 分钟`;
     
-    // 封面只用主标题，不传递副标题
+    // 封面只用主标题，传入副标题作为文本内容
     const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
       --title "${safeTitle}" \
-      --text "" \
+      --text "${subtitle || '点击查看详情'}" \
       --page-num 1 \
       --page-total 1 \
       --out "${coverPath}" \
@@ -344,8 +347,7 @@ async function step5GenerateCards(article, outputDir, topic) {
           --footer "${pageFooter}" \
           --bg "${cardStyle.bgColor || '#ffffff'}" \
           --highlight "${cardStyle.highlightColor || '#E60012'}" \
-          --line-height ${cardStyle.lineHeight || 1.9} \
-          --font-size ${cardStyle.fontSize || 28}`;
+          --chars-per-page ${cardStyle.charsPerPage || 350}`;
         
         execSync(cmd, { stdio: 'pipe', timeout: 60000 });
         
