@@ -1,6 +1,6 @@
 ---
 name: xiaohongshu-auto-m2img
-version: 2.0.0
+version: 2.1.0
 description: 小红书自动化图文生成技能 V2 - 一键完成：主题分析→文章生成→富文本排版→封面生成→分页卡片→小红书文案。采用 z-card-image 渲染，1.9倍行距，白色背景，暖橙色高亮，支持8并发卡片生成。
 metadata:
   openclaw:
@@ -196,6 +196,13 @@ wenyan --version
 
 ## 📝 更新日志
 
+### V2.1 (2026-04-02)
+- ✅ 封面标题使用小红书文案标题（而非文章原标题）
+- ✅ 封面位置下移（margin-top: 200px）
+- ✅ 正文header/footer边距对称（56px）
+- ✅ 修复偶数卡片footer缺失问题（content添加max-height: 975px）
+- ✅ 优化分页密度（charsPerPage 280→240，安全系数0.85→0.75）
+
 ### V2.0 (2026-03-31)
 - ✅ 采用 z-card-image 专业渲染
 - ✅ 实现 1.9 倍行距
@@ -215,5 +222,5 @@ MIT License - 自由使用和修改
 ---
 
 **作者**：OpenClaw  
-**版本**：V2.0  
-**更新日期**：2026-03-31
+**版本**：V2.1  
+**更新日期**：2026-04-02
