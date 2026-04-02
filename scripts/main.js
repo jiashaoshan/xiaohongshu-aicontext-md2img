@@ -871,36 +871,53 @@ async function step6RewriteForXiaohongshu(article, topic) {
     xhsContent = xhsContent.replace(new RegExp(key, 'g'), value);
   }
 
-  // 去AI味处理
-  console.log('   → 去AI味处理...');
+  // 去AI味处理 - 使用 humanizer-zh
+  console.log('   → 去AI味处理 (humanizer-zh)...');
   try {
-    const deAiPatterns = CONFIG.deAiPatterns || {};
+    const humanizerPath = path.join(process.env.HOME, '.openclaw/workspace/skills/humanizer-zh/humanizer-zh.js');
     
-    // 移除AI常用开头
-    if (deAiPatterns.remove) {
-      for (const pattern of deAiPatterns.remove) {
-        xhsContent = xhsContent.replace(new RegExp(pattern, 'gm'), '');
+    if (fs.existsSync(humanizerPath)) {
+      // 将内容写入临时文件
+      const tempInputFile = path.join(tempDir, 'humanizer_input.txt');
+      fs.writeFileSync(tempInputFile, xhsContent, 'utf-8');
+      
+      // 调用 humanizer-zh 进行改写
+      const humanizerCmd = `node "${humanizerPath}" -f "${tempInputFile}" -r`;
+      const result = execSync(humanizerCmd, { encoding: 'utf-8', stdio: 'pipe' });
+      
+      // 提取改写后的内容（humanizer-zh 输出格式处理）
+      const rewriteMatch = result.match(/改写建议[\s\S]*?\n\n([\s\S]*?)$/);
+      if (rewriteMatch) {
+        xhsContent = rewriteMatch[1].trim();
+      } else {
+        // 如果无法提取，尝试使用整个输出
+        xhsContent = result.trim();
       }
-    }
-    
-    // 替换词汇
-    if (deAiPatterns.replace) {
-      for (const [pattern, replacement] of Object.entries(deAiPatterns.replace)) {
-        xhsContent = xhsContent.replace(new RegExp(pattern, 'g'), replacement);
+      
+      // 清理临时文件
+      if (fs.existsSync(tempInputFile)) {
+        fs.unlinkSync(tempInputFile);
       }
-    }
-    
-    // 替换标记词
-    if (deAiPatterns.markers) {
-      for (const [pattern, replacement] of Object.entries(deAiPatterns.markers)) {
-        xhsContent = xhsContent.replace(new RegExp(`(${pattern})[，：]`, 'g'), `${replacement}`);
+      
+      console.log('   ✅ 已去AI味 (humanizer-zh)');
+    } else {
+      console.log('   ⚠️  humanizer-zh 未安装，使用内置规则');
+      // 回退到内置规则
+      const deAiPatterns = CONFIG.deAiPatterns || {};
+      if (deAiPatterns.remove) {
+        for (const pattern of deAiPatterns.remove) {
+          xhsContent = xhsContent.replace(new RegExp(pattern, 'gm'), '');
+        }
       }
+      if (deAiPatterns.replace) {
+        for (const [pattern, replacement] of Object.entries(deAiPatterns.replace)) {
+          xhsContent = xhsContent.replace(new RegExp(pattern, 'g'), replacement);
+        }
+      }
+      xhsContent = xhsContent.trim();
     }
-    
-    xhsContent = xhsContent.trim();
-    console.log('   ✅ 已去AI味');
   } catch (e) {
-    console.log('   ⚠️  去AI味处理失败，使用原文:', e.message);
+    console.log('   ⚠️  humanizer-zh 处理失败，使用原文:', e.message);
   }
 
   // 生成相关hashtag
@@ -950,12 +967,30 @@ function generateXiaohongshuTitle(originalTitle, topic) {
 
 // 生成相关hashtag
 function generateHashtags(topic) {
-  // 提取关键词
-  const keywords = topic.replace(/[^\u4e00-\u9fa5]/g, '').substring(0, 4);
+  // 智能提取关键词：优先提取话题中的核心名词
+  let keywords = '';
+  
+  // 清理话题，移除常见修饰词
+  const cleanTopic = topic.replace(/^(\u5982\u4f55|\u600e\u6837|\u4e3a\u4ec0\u4e48|\u4ec0\u4e48|\u54ea\u91cc|\u54ea\u4e2a|\u63a8\u8350|\u9002\u5408|\u6700\u597d)/, '')
+                          .replace(/(\u6700\u597d|\u63a8\u8350|\u9002\u5408|\u653b\u7565|\u6307\u5357|\u8be6\u89e3|\u6df1\u5ea6)/g, '')
+                          .trim();
+  
+  // 提取中\u6587\u5173\u952e\u8bcd（\u53d6\u524d6\u4e2a\u5b57\uff0c\u66f4\u5b8c\u6574）
+  const chineseChars = cleanTopic.match(/[\u4e00-\u9fa5]+/g);
+  if (chineseChars && chineseChars.length > 0) {
+    // 取\u6700\u957f\u7684\u4e00\u6bb5\u4e2d\u6587\uff0c\u6216\u5408\u5e76\u591a\u6bb5
+    const longestSegment = chineseChars.sort((a, b) => b.length - a.length)[0];
+    keywords = longestSegment.substring(0, 6);
+  }
+  
+  // 如\u679c\u63d0\u53d6\u4e0d\u5230\uff0c\u4f7f\u7528\u9ed8\u8ba4
+  if (!keywords) {
+    keywords = '深\u5ea6\u597d\u6587';
+  }
 
-  // 通用hashtag组合
+  // 通\u7528hashtag\u7ec4\u5408
   const baseTags = CONFIG.hashtags?.base || ['#干货分享', '#知识科普', '#必看', '#自我提升'];
-  const topicTag = keywords ? `#${keywords}` : '#深度好文';
+  const topicTag = `#${keywords}`;
 
   return [topicTag, ...baseTags].join(' ');
 }
