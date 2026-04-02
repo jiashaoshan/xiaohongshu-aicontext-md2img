@@ -2,6 +2,8 @@
 /**
  * 小红书自动化图文生成技能 - 主脚本
  * 7步工作流:分析→生成→排版→封面→分页→改写→整理
+ * 
+ * 修改: 使用 openclaw agent 调用笔杆子 agent 生成文章
  */
 
 const { execSync } = require('child_process');
@@ -10,8 +12,6 @@ const path = require('path');
 
 const SKILL_DIR = path.dirname(path.dirname(__filename));
 const WECHAT_PROMPT = path.join(process.env.HOME, '.openclaw/workspace/skills/wechat-prompt-context');
-const MARKDOWN_TO_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/markdown-to-image');
-const DOUBAO_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/doubao-image-create');
 const Z_CARD_IMAGE = path.join(process.env.HOME, '.openclaw/workspace/skills/z-card-image');
 
 // 加载配置
@@ -67,8 +67,7 @@ function checkDependencies() {
 
   const deps = [
     { path: WECHAT_PROMPT, name: 'wechat-prompt-context' },
-    { path: MARKDOWN_TO_IMAGE, name: 'markdown-to-image' },
-    { path: DOUBAO_IMAGE, name: 'doubao-image-create' }
+    { path: Z_CARD_IMAGE, name: 'z-card-image' }
   ];
 
   for (const dep of deps) {
@@ -105,7 +104,7 @@ function step1AnalyzeAndGeneratePrompt(topic, type) {
     execSync(promptCmd, { stdio: 'pipe' });
 
     // 读取提示词
-    const promptPath = path.join(WECHAT_PROMPT, 'output/prompt.txt');
+    const promptPath = path.join(WECHAT_PROMPT, 'output/generated_prompt.txt');
     const prompt = fs.readFileSync(promptPath, 'utf-8');
     console.log(`   📝 提示词长度: ${prompt.length} 字符`);
 
@@ -119,25 +118,56 @@ function step1AnalyzeAndGeneratePrompt(topic, type) {
   }
 }
 
-// 步骤2:撰写文章
+// 步骤2:撰写文章 - 使用 openclaw agent 调用笔杆子 agent
 async function step2WriteArticle(prompt, topic) {
   console.log('\n✍️  步骤2: 撰写完整文章...');
+  console.log('   → 调用笔杆子 agent 生成文章...');
   const startTime = Date.now();
 
   try {
-    // 调用 wechat-prompt-context 的 write-article.js
-    console.log('   → 调用笔杆子 agent 生成文章...');
-    const writeCmd = `cd "${WECHAT_PROMPT}" && node scripts/write-article.js`;
-    
-    // 将提示词写入文件
-    const promptPath = path.join(WECHAT_PROMPT, 'output/prompt.txt');
-    fs.writeFileSync(promptPath, prompt, 'utf-8');
-    
-    execSync(writeCmd, { stdio: 'pipe', timeout: 300000 });
+    // 准备提示词
+    const fullPrompt = `${prompt}
 
-    // 读取生成的文章
+重要提示：
+1. 直接输出文章内容，不要包含任何解释、思考过程或前言
+2. 不要使用"让我开始写作"、"以下是关于"等提示词语言
+3. 从正文标题开始直接写，不要写创作思路或分析
+4. 文章开头直接是 # 标题，然后是正文内容`;
+
+    // 保存提示词到文件
+    const promptPath = path.join(WECHAT_PROMPT, 'output/generated_prompt.txt');
+    fs.writeFileSync(promptPath, fullPrompt, 'utf-8');
+
+    // 使用 openclaw agent 调用笔杆子 agent
+    const openclawCmd = `openclaw agent --agent creator --file "${promptPath}" --json --timeout 600`;
+    
+    console.log('   → 等待笔杆子 agent 生成...');
+    const result = execSync(openclawCmd, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024, // 10MB
+      timeout: 600000 // 10分钟
+    });
+
+    // 解析返回结果
+    let article = '';
+    try {
+      const response = JSON.parse(result);
+      if (response.result && response.result.payloads && response.result.payloads.length > 0) {
+        article = response.result.payloads.map(p => p.text || '').join('\n');
+      } else if (response.text) {
+        article = response.text;
+      }
+    } catch (e) {
+      // 如果不是JSON格式，直接使用文本
+      article = result;
+    }
+
+    // 清理文章 - 移除可能的提示词内容
+    article = cleanArticleContent(article);
+
+    // 保存到标准位置
     const articlePath = path.join(WECHAT_PROMPT, 'output/article.md');
-    const article = fs.readFileSync(articlePath, 'utf-8');
+    fs.writeFileSync(articlePath, article, 'utf-8');
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`✅ 文章生成完成 (${duration}s)`);
@@ -149,6 +179,32 @@ async function step2WriteArticle(prompt, topic) {
     console.error('❌ 步骤2失败:', error.message);
     throw error;
   }
+}
+
+// 清理文章内容，移除LLM提示词
+function cleanArticleContent(article) {
+  // 移除常见的LLM提示词开头
+  const promptPatterns = [
+    /我已经收到了用户的请求[\s\S]*?让我开始写作[：:]?\s*/,
+    /我来为你撰写[\s\S]*?开始创作[：:]?\s*/,
+    /以下是关于[\s\S]*?的文章[：:]?\s*/,
+    /根据你的要求[\s\S]*?正文如下[：:]?\s*/,
+    /我会按照要求[\s\S]*?开始写作[：:]?\s*/,
+    /好的，我来[\s\S]*?开始[：:]?\s*/,
+  ];
+  
+  let cleaned = article;
+  for (const pattern of promptPatterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  
+  // 找到第一个 # 标题，保留之后的内容
+  const titleMatch = cleaned.match(/^#[^#]/m);
+  if (titleMatch && cleaned.indexOf(titleMatch[0]) > 0) {
+    cleaned = cleaned.substring(cleaned.indexOf(titleMatch[0]));
+  }
+  
+  return cleaned.trim();
 }
 
 // 步骤3:Markdown转富文本
@@ -173,12 +229,11 @@ async function step3ConvertToRichText(article, outputDir, theme) {
     return outputPath;
   } catch (error) {
     console.error('❌ 步骤3失败:', error.message);
-    // 失败时返回原始markdown
     return article;
   }
 }
 
-// 步骤4:生成封面图(使用 z-card-image 生成标题页，只保留主标题)
+// 步骤4:生成封面图(只保留主标题)
 function step4GenerateCover(topic, summary, outputDir, title, article) {
   console.log('\n🖼️  步骤4: 生成封面图...');
 
@@ -187,7 +242,7 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
   try {
     const safeTitle = title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     
-    // 估算阅读时间（按每分钟300字计算）
+    // 估算阅读时间
     const wordCount = article.length;
     const readTime = Math.max(1, Math.ceil(wordCount / 300));
     
@@ -204,19 +259,17 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
       --footer "${coverFooter}" \
       --bg "${cardStyle.bgColor || '#ffffff'}" \
       --highlight "${cardStyle.highlightColor || '#E60012'}" \
-      --page-num 1 \
-      --page-total 1 \
       --cover`;
     
     execSync(cmd, { stdio: 'pipe', timeout: 60000 });
     console.log('   ✅ 封面渲染完成:', coverPath);
     
     if (fs.existsSync(coverPath)) {
-      console.log('✅ 封面图生成完成 (z-card-image 标题页)');
+      console.log('✅ 封面图生成完成');
       return coverPath;
     }
   } catch (error) {
-    console.error('⚠️  z-card-image 封面生成失败:', error.message);
+    console.error('⚠️  封面生成失败:', error.message);
   }
   
   return null;
@@ -233,32 +286,14 @@ async function step5GenerateCards(article, outputDir, topic) {
     const titleMatch = cleanArticle.match(/^# (.+)$/m);
     const title = titleMatch ? titleMatch[1] : topic;
     cleanArticle = cleanArticle.replace(/^# .+\n/, '');
+    cleanArticle = cleanArticle.trim();
     
-    // 过滤LLM提示词
-    const writingMatch = cleanArticle.match(/让我开始写作[：:]\s*#+\s+/);
-    if (writingMatch) {
-      const startIndex = cleanArticle.indexOf(writingMatch[0]) + writingMatch[0].length - 1;
-      cleanArticle = cleanArticle.substring(startIndex);
-    }
-    
-    const lines = cleanArticle.split('\n');
-    let startIndex = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.match(/^#{1,2}\s+/) && line.length > 3) {
-        startIndex = i;
-        break;
-      }
-    }
-    cleanArticle = lines.slice(startIndex).join('\n');
-
     // 分页
     const charsPerPage = CONFIG.card?.charsPerPage || 320;
     const pages = splitArticleIntoPages(cleanArticle, charsPerPage);
     const totalPages = pages.length;
     
     console.log(`   📊 文章分 ${totalPages} 页`);
-    console.log(`   📝 平均每页: ${Math.floor(cleanArticle.length / totalPages)} 字符`);
 
     // 生成卡片
     const cardsDir = path.join(outputDir, 'cards');
@@ -296,10 +331,9 @@ async function step5GenerateCards(article, outputDir, topic) {
         const escapedTitle = title.replace(/"/g, '\\"');
         
         const cardStyle = CONFIG.cardStyle || {};
-        const showFooter = cardStyle.showFooter !== false;
         const pageCharCount = pageContent.length;
         const pageReadTime = Math.max(1, Math.ceil(pageCharCount / 300));
-        const pageFooter = showFooter ? `字数 ${pageCharCount} | 阅读约 ${pageReadTime} 分钟` : '';
+        const pageFooter = `字数 ${pageCharCount} | 阅读约 ${pageReadTime} 分钟`;
         
         const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
           --title "${escapedTitle}" \
@@ -316,7 +350,7 @@ async function step5GenerateCards(article, outputDir, topic) {
         execSync(cmd, { stdio: 'pipe', timeout: 60000 });
         
         if (fs.existsSync(cardPath)) {
-          console.log(`   ✅ 卡片 ${pageNum}/${totalPages} (${pageIndex % CONCURRENT_LIMIT + 1}/${Math.min(tasks.length, CONCURRENT_LIMIT)})`);
+          console.log(`   ✅ 卡片 ${pageNum}/${totalPages}`);
           return true;
         }
       } catch (error) {
@@ -337,7 +371,6 @@ async function step5GenerateCards(article, outputDir, topic) {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`✅ 生成完成 (${duration}s)`);
-    console.log(`   📁 卡片目录: ${cardsDir}`);
 
     return cardsDir;
   } catch (error) {
@@ -384,40 +417,13 @@ async function step6RewriteForXiaohongshu(article, topic) {
   const titleMatch = article.match(/^# (.+)$/m);
   const originalTitle = titleMatch ? titleMatch[1] : topic;
 
-  // 生成爆款小红书标题
+  // 生成小红书标题
   const xhsTitle = generateXiaohongshuTitle(originalTitle, topic);
 
   // 提取正文
   let content = article.replace(/^---[\s\S]*?---\n*/, '');
   content = content.replace(/^# .+\n/, '');
-
-  // 过滤LLM提示词
-  const writingMatch = content.match(/让我开始写作[：:]\s*#+\s+/);
-  if (writingMatch) {
-    const startIndex = content.indexOf(writingMatch[0]) + writingMatch[0].length - 1;
-    content = content.substring(startIndex);
-  }
-
-  const promptPatterns = [
-    /我已经收到了用户的请求[\s\S]*?让我开始写作[：:]?\s*/,
-    /我来为你撰写[\s\S]*?开始创作[：:]?\s*/,
-    /以下是关于[\s\S]*?的文章[：:]?\s*/,
-    /根据你的要求[\s\S]*?正文如下[：:]?\s*/,
-  ];
-  for (const pattern of promptPatterns) {
-    content = content.replace(pattern, '');
-  }
-
-  const lines = content.split('\n');
-  let startIndex = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.match(/^#{1,2}\s+/) && line.length > 3) {
-      startIndex = i;
-      break;
-    }
-  }
-  content = lines.slice(startIndex).join('\n');
+  content = cleanArticleContent(content);
 
   // 截取1000字以内
   const contentMaxLength = CONFIG.xiaohongshu?.contentMaxLength || 1000;
@@ -462,17 +468,14 @@ async function step6RewriteForXiaohongshu(article, topic) {
   };
 }
 
-// 生成爆款小红书标题
+// 生成小红书标题
 function generateXiaohongshuTitle(originalTitle, topic) {
   const titleMaxLength = CONFIG.xiaohongshu?.titleMaxLength || 20;
   const formulas = CONFIG.titleFormulas || [
     `3分钟读懂{topic}`,
     `{topic}|看完这篇就够了`,
     `终于有人把{topic}讲清楚了`,
-    `{topic}?90%的人都理解错了`,
-    `关于{topic},没人告诉你的真相`,
-    `读完{topic},我悟了`,
-    `{topic}|改变我人生的3个观点`
+    `{topic}?90%的人都理解错了`
   ];
 
   const processedFormulas = formulas.map(f => 
@@ -490,7 +493,7 @@ function generateXiaohongshuTitle(originalTitle, topic) {
   return originalTitle.substring(0, titleMaxLength);
 }
 
-// 生成相关hashtag
+// 生成hashtag
 function generateHashtags(topic) {
   let keywords = '';
   
@@ -541,10 +544,8 @@ function step7OrganizeOutput(topic, article, xiaohongshu, outputBaseDir) {
 }
 
 // 保存所有文件
-function saveAllFiles(outputDir, topic, article, prompt, analysis, xiaohongshu) {
+function saveAllFiles(outputDir, topic, article, xiaohongshu) {
   fs.writeFileSync(path.join(outputDir, 'formatted/article.md'), article);
-  fs.writeFileSync(path.join(outputDir, 'formatted/prompt.txt'), prompt);
-  fs.writeFileSync(path.join(outputDir, 'formatted/topic_analysis.json'), JSON.stringify(analysis, null, 2));
 
   const redbookContent = `标题：${xiaohongshu.title}
 
@@ -566,12 +567,6 @@ ${xiaohongshu.hashtags}
 - formatted/ - 文章富文本
 - card/ - 卡片图片
 - redbook_context.txt - 小红书文案
-
-## 小红书发布指南
-
-1. 使用 card/cover.png 作为封面
-2. 依次上传 card/ 中的所有卡片
-3. 复制 redbook_context.txt 中的内容发布
 `;
   fs.writeFileSync(path.join(outputDir, 'README.md'), readme);
 
@@ -640,17 +635,10 @@ async function main() {
       fs.rmdirSync(cardsDir);
     }
 
-    fs.writeFileSync(path.join(tempDir, 'prompt.txt'), prompt);
-    fs.writeFileSync(path.join(tempDir, 'topic_analysis.json'), JSON.stringify(analysis, null, 2));
-    
-    saveAllFiles(finalOutputDir, options.topic, article, prompt, analysis, xiaohongshu);
+    saveAllFiles(finalOutputDir, options.topic, article, xiaohongshu);
 
     console.log('\n🎉 全部完成!');
     console.log(`📁 输出目录: ${finalOutputDir}`);
-    console.log('\n文件结构:');
-    console.log('  formatted/ - 文章富文本');
-    console.log('  card/ - 卡片图片');
-    console.log('  redbook_context.txt - 小红书文案');
 
   } catch (error) {
     console.error('\n❌ 执行失败:', error.message);
