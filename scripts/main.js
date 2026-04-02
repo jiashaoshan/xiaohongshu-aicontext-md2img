@@ -258,8 +258,8 @@ function step4GenerateCover(topic, summary, outputDir, title, article) {
     const cardStyle = CONFIG.cardStyle || {};
     const coverFooter = `字数 ${wordCount} | 阅读约 ${readTime} 分钟`;
     
-    // 封面只用主标题，传入副标题作为文本内容
-    const safeSubtitle = (summary || '点击查看详情').substring(0, 50);
+    // 封面只用主标题，不显示副标题（传空格占位）
+    const safeSubtitle = " ";
     const cmd = `python3 "${Z_CARD_IMAGE}/scripts/render_article.py" \
       --title "${safeTitle}" \
       --text "${safeSubtitle}" \
@@ -461,6 +461,33 @@ async function step6RewriteForXiaohongshu(article, topic) {
   } catch (e) {
     console.log('   ⚠️  去AI味处理失败:', e.message);
   }
+
+  // 减少换行（最多保留一个空行）
+  xhsContent = xhsContent.replace(/\n{3,}/g, '\n\n');
+  xhsContent = xhsContent.replace(/^\n+|\n+$/g, '');
+  
+  // 添加emoji到关键位置
+  const emojis = ['✨', '💡', '🔥', '⭐', '💪', '📌', '👉', '⚡', '🎯', '🚀'];
+  const lines = xhsContent.split('\n');
+  let emojiIndex = 0;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    // 给段落开头添加emoji（每3-5行添加一个）
+    if (line.length > 20 && emojiIndex < emojis.length) {
+      if (i % 4 === 0 || line.match(/^(首先|其次|最后|总结|建议|注意)/)) {
+        lines[i] = emojis[emojiIndex] + ' ' + line;
+        emojiIndex++;
+      }
+    }
+    // 给小标题添加emoji
+    if (line.match(/^(##?\s|【|\[)/)) {
+      lines[i] = '📌 ' + line;
+    }
+  }
+  xhsContent = lines.join('\n\n');
+  
+  console.log('   ✅ 已添加emoji');
 
   // 生成hashtag
   const hashtags = generateHashtags(topic);
