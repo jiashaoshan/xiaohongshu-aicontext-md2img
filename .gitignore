@@ -26,3 +26,6 @@ logs/
 # Test files
 test*.js
 *_test.js
+
+# Temporary scripts
+generate_cards.sh
