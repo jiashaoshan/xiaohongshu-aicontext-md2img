@@ -395,7 +395,7 @@ function splitArticleIntoPages(article, charsPerPage) {
   
   let currentPage = '';
   let currentChars = 0;
-  const safeCharsPerPage = Math.floor(charsPerPage * 0.9);
+  const safeCharsPerPage = Math.floor(charsPerPage * 0.85);
   
   for (const para of paragraphs) {
     const paraChars = para.length;

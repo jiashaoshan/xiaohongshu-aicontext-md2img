@@ -9,7 +9,7 @@
   },
   "card": {
     "concurrentLimit": 8,
-    "charsPerPage": 240,
+    "charsPerPage": 380,
     "maxRetries": 2,
     "timeoutMs": 60000,
     "batchDelayMs": 500
